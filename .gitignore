@@ -1,0 +1,6 @@
+data
+book
+.venv
+# Model auto-downloaded on first run (GitHub 100 MB limit)
+models/
+*.onnx
