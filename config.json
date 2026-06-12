@@ -1,18 +1,18 @@
 {
   "team_id": "Winners",
-  "mqtt_host": "localhost",
+  "mqtt_host": "157.173.101.159",
   "mqtt_port": 1883,
   "ws_host": "0.0.0.0",
   "ws_port": 9002,
-  "camera_index": "auto",
-
+  "camera_index": "0",
   "tracking": {
-    "dead_zone_px": 80,
-    "smoothing_alpha": 0.6,
-    "publish_hz": 12.0,
-    "min_consecutive_frames": 2
+    "dead_zone_px": 100,
+    "smoothing_alpha": 0.35,
+    "publish_hz": 6.0,
+    "center_publish_hz": 2.0,
+    "min_consecutive_frames": 4,
+    "release_margin": 1.6
   },
-
   "servo": {
     "min_angle": 0,
     "max_angle": 180,
@@ -23,11 +23,10 @@
     "jitter_deadband": 1.0,
     "invert_direction": false
   },
-
   "hardware": {
     "mode": "auto",
-    "serial_port": "auto",
+    "serial_port": "/dev/ttyUSB0",
     "serial_baud": 115200,
-    "board": "esp8266"
+    "board": "esp32"
   }
 }

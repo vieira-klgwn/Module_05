@@ -36,15 +36,16 @@ static const char* TEAM_ID   = "Winners";          // MUST match PC + backend
 // ===========================================================================
 
 // ===== Servo config ========================================================
-static const int  SERVO_PIN      = 18;   // any PWM-capable GPIO
+static const int  SERVO_PIN      = 13;   // any PWM-capable GPIO
 static const int  SERVO_MIN      = 0;
 static const int  SERVO_MAX      = 180;
 static const int  SERVO_CENTER   = 90;
 static const bool INVERT_DIRECTION = false;
 
-static const int TRACK_STEP  = 3;
+static const int TRACK_STEP  = 2;   // smaller steps = less overshoot when centering
 static const int SMOOTH_STEP = 1;
-static const int SEARCH_STEP = 4;
+static const int SEARCH_STEP = 3;
+static const unsigned long TRACK_COOLDOWN_MS = 60;  // ignore burst MQTT duplicates
 // ===========================================================================
 
 String topicMovement;
@@ -56,6 +57,7 @@ int  currentAngle = SERVO_CENTER;
 int  targetAngle  = SERVO_CENTER;
 bool searchMode   = false;
 int  searchDir    = 1;
+unsigned long lastTrackMs = 0;
 
 void clampTarget() {
   if (targetAngle < SERVO_MIN) targetAngle = SERVO_MIN;
@@ -73,8 +75,15 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   if (deserializeJson(doc, payload, length)) return;
   String s = String((const char*)(doc["status"] | "NO_FACE"));
 
-  if (s == "MOVE_LEFT" || s == "MOVE_RIGHT" || s == "CENTERED") {
+  if (s == "CENTERED") {
+    // Face is centred — stop immediately (do not finish queued targetAngle steps).
     searchMode = false;
+    targetAngle = currentAngle;
+  } else if (s == "MOVE_LEFT" || s == "MOVE_RIGHT") {
+    searchMode = false;
+    unsigned long now = millis();
+    if (now - lastTrackMs < TRACK_COOLDOWN_MS) return;
+    lastTrackMs = now;
     if (s == "MOVE_LEFT")  targetAngle += (INVERT_DIRECTION ?  TRACK_STEP : -TRACK_STEP);
     if (s == "MOVE_RIGHT") targetAngle += (INVERT_DIRECTION ? -TRACK_STEP :  TRACK_STEP);
   } else if (s == "NO_FACE") {

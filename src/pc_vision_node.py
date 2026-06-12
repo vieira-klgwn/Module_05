@@ -78,8 +78,10 @@ def main() -> None:
         dead_zone_px=float(cfg.tracking_get("dead_zone_px", 80)),
         smoothing_alpha=float(cfg.tracking_get("smoothing_alpha", 0.6)),
         min_consecutive=int(cfg.tracking_get("min_consecutive_frames", 2)),
+        release_margin=float(cfg.tracking_get("release_margin", 1.25)),
     )
-    publish_hz = float(cfg.tracking_get("publish_hz", 12.0))
+    track_hz = float(cfg.tracking_get("publish_hz", 6.0))
+    center_hz = float(cfg.tracking_get("center_publish_hz", 2.0))
 
     target_emb = db[target].reshape(-1).astype(np.float32)
     lock = Lock(identity=target)
@@ -128,23 +130,33 @@ def main() -> None:
                 lock.last_sim = sim
                 confidence = sim
                 center_x = cx
-            elif lock.locked and (now - lock.last_seen) <= LOCK_RELEASE_SEC:
-                # short miss: keep the last committed direction, lower confidence
+            elif lock.locked and faces and (now - lock.last_seen) <= LOCK_RELEASE_SEC:
                 confidence = float(lock.last_sim)
                 center_x = tracker.smoothed_center_x
             else:
+                if lock.locked:
+                    tracker.reset()
                 lock.locked = False
                 lock.last_sim = 0.0
 
-            status = tracker.update(center_x, w)
+            if lock.locked:
+                status = tracker.update(center_x, w)
+            else:
+                status = "NO_FACE"
 
-            pub_due = (now - last_pub) >= (1.0 / max(1.0, publish_hz))
-            if pub_due or status != last_status:
+            track_due = (now - last_pub) >= (1.0 / max(1.0, track_hz))
+            center_due = (now - last_pub) >= (1.0 / max(1.0, center_hz))
+            if status in ("MOVE_LEFT", "MOVE_RIGHT"):
+                need_pub = (status != last_status) or track_due
+            elif status == "CENTERED":
+                need_pub = (status != last_status) or center_due
+            else:
+                need_pub = (status != last_status) or center_due
+            if need_pub:
                 publisher.publish_movement(
                     status=status,
                     confidence=confidence,
-                    identity=target,
-                    locked=lock.locked,
+                    esp_compatible=True,
                 )
                 last_pub = now
                 last_status = status

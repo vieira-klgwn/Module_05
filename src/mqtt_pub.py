@@ -56,7 +56,13 @@ class MqttPublisher:
 
         # VERSION2 signatures carry an extra `properties` argument.
         def _on_connect(client, userdata, flags, reason_code, properties=None):
-            self.connected = (int(getattr(reason_code, "value", reason_code)) == 0)
+            ok = int(getattr(reason_code, "value", reason_code)) == 0
+            self.connected = ok
+            if ok:
+                print(
+                    f"[mqtt] connected to {self.cfg.mqtt_host}:{self.cfg.mqtt_port} "
+                    f"topic={self.cfg.topic_movement}"
+                )
 
         def _on_disconnect(client, userdata, *args):
             self.connected = False
@@ -86,9 +92,21 @@ class MqttPublisher:
         except Exception:
             pass
 
-    def publish_movement(self, status: str, confidence: float, **extra: Any) -> None:
-        payload = MovementPayload(status=status, confidence=float(confidence), timestamp=int(time.time())).to_dict()
-        if extra:
+    def publish_movement(
+        self,
+        status: str,
+        confidence: float = 0.0,
+        *,
+        esp_compatible: bool = True,
+        **extra: Any,
+    ) -> None:
+        """Publish movement for the ESP32 (status + confidence + timestamp only)."""
+        payload = MovementPayload(
+            status=status,
+            confidence=float(confidence),
+            timestamp=int(time.time()),
+        ).to_dict()
+        if not esp_compatible and extra:
             payload.update(extra)
         self._safe_publish(self.cfg.topic_movement, json.dumps(payload))
 

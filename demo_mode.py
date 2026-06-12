@@ -95,8 +95,9 @@ def _draw_overlay(
             cy = int(np.mean(f.kps[:, 1]))
             cv2.drawMarker(vis, (cx, cy), CYAN, cv2.MARKER_CROSS, 26, 2)
 
-    # centre dead-zone guides
-    cv2.line(vis, (w // 2, 0), (w // 2, h), (90, 90, 90), 1)
+    # centre dead-zone guides (±dead_zone_px from frame centre)
+    mid = w // 2
+    cv2.line(vis, (mid, 0), (mid, h), (90, 90, 90), 1)
 
     banner = {
         "MOVE_LEFT": ("SERVO MOVING LEFT", CYAN),
@@ -132,14 +133,19 @@ def run(target: str = "", show_window: bool = True, publish_frames: bool = True)
         dead_zone_px=float(cfg.tracking_get("dead_zone_px", 80)),
         smoothing_alpha=float(cfg.tracking_get("smoothing_alpha", 0.6)),
         min_consecutive=int(cfg.tracking_get("min_consecutive_frames", 2)),
+        release_margin=float(cfg.tracking_get("release_margin", 1.25)),
     )
-    publish_hz = float(cfg.tracking_get("publish_hz", 12.0))
+    track_hz = float(cfg.tracking_get("publish_hz", 6.0))
+    center_hz = float(cfg.tracking_get("center_publish_hz", 2.0))
 
     cap = open_camera(cfg.camera_index)
     if cap is None:
         raise RuntimeError("Camera not available (tried configured index and auto-probe 0..4)")
 
-    print(f"[demo] team={cfg.team_id} target={target} | publishing movement+frame over MQTT")
+    print(
+        f"[demo] team={cfg.team_id} target={target} | "
+        f"MQTT {cfg.mqtt_host}:{cfg.mqtt_port} -> {cfg.topic_movement}"
+    )
     print(f"[demo] open the dashboard: dashboard/index.html (ws://localhost:{cfg.ws_port})")
 
     locked = False
@@ -194,25 +200,37 @@ def run(target: str = "", show_window: bool = True, publish_frames: bool = True)
                 last_sim = best_sim
                 confidence = best_sim
                 center_x = best_cx
-            elif locked and (now - last_seen) <= LOCK_RELEASE_SEC:
+            elif locked and faces and (now - last_seen) <= LOCK_RELEASE_SEC:
                 confidence = last_sim
                 center_x = tracker.smoothed_center_x
             else:
+                if locked:
+                    tracker.reset()
                 locked = False
                 last_sim = 0.0
 
-            status = tracker.update(center_x, w)
+            # ESP firmware: NO_FACE enables sweep search; MOVE_* steps 3° per message.
+            if locked:
+                status = tracker.update(center_x, w)
+            else:
+                status = "NO_FACE"
 
-            recognized = any(a for (_, _, a) in labels)
-            pub_due = (now - last_pub) >= (1.0 / max(1.0, publish_hz))
-            if pub_due or status != last_status:
+            track_due = (now - last_pub) >= (1.0 / max(1.0, track_hz))
+            center_due = (now - last_pub) >= (1.0 / max(1.0, center_hz))
+            if status in ("MOVE_LEFT", "MOVE_RIGHT"):
+                # Slow track commands — each MQTT message steps the servo on the ESP.
+                need_pub = (status != last_status) or track_due
+            elif status == "CENTERED":
+                # Hold: tell ESP to stop; repeat slowly so search mode stays off.
+                need_pub = (status != last_status) or center_due
+            else:
+                # NO_FACE once enables ESP sweep; occasional repeat keeps it searching.
+                need_pub = (status != last_status) or center_due
+            if need_pub:
                 publisher.publish_movement(
                     status=status,
                     confidence=confidence,
-                    identity=locked_name if locked else "",
-                    recognized=recognized,
-                    locked=locked,
-                    faces=len(faces),
+                    esp_compatible=True,
                 )
                 last_pub = now
                 last_status = status
@@ -224,7 +242,7 @@ def run(target: str = "", show_window: bool = True, publish_frames: bool = True)
             vis = frame.copy()
             _draw_overlay(vis, faces, labels, best_idx if locked else None, status, locked_name)
 
-            if publish_frames and pub_due:
+            if publish_frames and need_pub:
                 b64 = _encode_frame(vis)
                 if b64:
                     publisher.publish_frame(b64)

@@ -83,7 +83,7 @@ def _cleanup() -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Face-Locked Servo — REAL hardware exam mode")
-    ap.add_argument("--target", default="", help="enrolled identity to lock onto")
+    ap.add_argument("--target", default="Vieira", help="enrolled identity to lock onto")
     ap.add_argument("--no-broker", action="store_true", help="use external/VPS broker (set mqtt_host in config.json)")
     ap.add_argument("--no-window", action="store_true", help="headless vision (dashboard only)")
     ap.add_argument("--no-dashboard", action="store_true", help="do not open browser")
@@ -115,7 +115,10 @@ def main() -> None:
     print("=" * 60)
 
     # 1) MQTT broker (only if local and not already running)
-    if not args.no_broker and not _port_open(host, port):
+    remote_broker = cfg.mqtt_host not in ("localhost", "127.0.0.1", "0.0.0.0", "")
+    if remote_broker:
+        print(f"[exam] using remote broker at {cfg.mqtt_host}:{port} (same as ESP32 firmware)")
+    if not args.no_broker and not remote_broker and not _port_open(host, port):
         mosq = shutil.which("mosquitto")
         if mosq:
             conf = ROOT / "backend" / "mosquitto.conf"
